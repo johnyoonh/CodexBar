@@ -34,10 +34,28 @@ final class DisplayLinkDriver {
                 minimum: rate,
                 maximum: rate,
                 preferred: rate)
+            // Pause when app is backgrounded to save CPU/battery
+            displayLink.isPaused = false
             displayLink.add(to: .main, forMode: .common)
             self.displayLink = displayLink
         } else {
             self.startCVDisplayLink()
+        }
+    }
+    
+    func pause() {
+        if #available(macOS 15, *), let displayLink {
+            displayLink.isPaused = true
+        } else if let cvDisplayLink {
+            CVDisplayLinkStop(cvDisplayLink)
+        }
+    }
+    
+    func resume() {
+        if #available(macOS 15, *), let displayLink {
+            displayLink.isPaused = false
+        } else if let cvDisplayLink {
+            CVDisplayLinkStart(cvDisplayLink)
         }
     }
 

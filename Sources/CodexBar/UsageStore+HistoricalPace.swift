@@ -66,6 +66,13 @@ extension UsageStore {
     func backfillCodexHistoricalFromDashboardIfNeeded(_ dashboard: OpenAIDashboardSnapshot) {
         guard self.settings.historicalTrackingEnabled else { return }
         guard !dashboard.usageBreakdown.isEmpty else { return }
+        
+        // Debounce: only backfill if dashboard data changed significantly
+        let dashboardHash = dashboard.usageBreakdown.count
+        if self.lastBackfillHash == dashboardHash {
+            return
+        }
+        self.lastBackfillHash = dashboardHash
 
         let codexSnapshot = self.snapshots[.codex]
         let accountKey = self.codexHistoricalAccountKey(

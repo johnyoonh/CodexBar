@@ -365,7 +365,7 @@ extension StatusItemController {
         
         let needsAnimation = self.needsMenuBarIconAnimation()
         if let phase, needsAnimation {
-            var pattern = self.animationPattern
+            let pattern = self.animationPattern
             if pattern == .unbraid {
                 morphProgress = pattern.value(phase: phase) / 100
                 primary = nil
@@ -686,7 +686,10 @@ extension StatusItemController {
         self.animationPhase += 0.045 // half-speed animation
         if self.shouldMergeIcons {
             self.applyIcon(phase: self.animationPhase)
-            self.applySeparateBarsIcon(phase: self.animationPhase)
+            // Only update separate bars if enabled and visible
+            if self.settings.menuBarShowsSeparateBars, let item = self.separateBarsStatusItem, item.isVisible {
+                self.applySeparateBarsIcon(phase: self.animationPhase)
+            }
         } else {
             UsageProvider.allCases.forEach { self.applyIcon(for: $0, phase: self.animationPhase) }
         }
