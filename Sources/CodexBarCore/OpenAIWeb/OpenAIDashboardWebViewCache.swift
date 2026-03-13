@@ -30,6 +30,8 @@ final class OpenAIDashboardWebViewCache {
 
     private var entries: [ObjectIdentifier: Entry] = [:]
     private let idleTimeout: TimeInterval = 10 * 60
+    private var lastPruneAt: Date = Date()
+    private let pruneInterval: TimeInterval = 30 // Only prune every 30 seconds max
 
     // MARK: - Testing support
 
@@ -66,7 +68,11 @@ final class OpenAIDashboardWebViewCache {
         navigationTimeout: TimeInterval = 15) async throws -> OpenAIDashboardWebViewLease
     {
         let now = Date()
-        self.prune(now: now)
+        // Debounce pruning to avoid excessive cleanup during rapid requests
+        if now.timeIntervalSince(self.lastPruneAt) >= self.pruneInterval {
+            self.prune(now: now)
+            self.lastPruneAt = now
+        }
 
         let log: (String) -> Void = { message in
             logger?("[webview] \(message)")

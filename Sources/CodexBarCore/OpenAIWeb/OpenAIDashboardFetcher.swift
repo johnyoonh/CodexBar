@@ -3,6 +3,40 @@ import CoreGraphics
 import Foundation
 import WebKit
 
+/// Simple cache for dashboard data to avoid redundant WebView fetches
+@MainActor
+final class OpenAIDashboardRequestCache {
+    static let shared = OpenAIDashboardRequestCache()
+    
+    private struct CachedEntry {
+        let snapshot: OpenAIDashboardSnapshot
+        let cachedAt: Date
+        let requestHash: String
+    }
+    
+    private var cache: [String: CachedEntry] = [:]
+    private let maxAge: TimeInterval = 120 // Cache for 2 minutes max
+    
+    func getIfValid(requestHash: String) -> OpenAIDashboardSnapshot? {
+        guard let entry = cache[requestHash],
+              Date().timeIntervalSince(entry.cachedAt) < maxAge
+        else {
+            return nil
+        }
+        return entry.snapshot
+    }
+    
+    func set(_ snapshot: OpenAIDashboardSnapshot, requestHash: String) {
+        cache[requestHash] = CachedEntry(
+            snapshot: snapshot,
+            cachedAt: Date(),
+            requestHash: requestHash)
+        // Clean old entries
+        let now = Date()
+        cache = cache.filter { now.timeIntervalSince($0.value.cachedAt) < maxAge }
+    }
+}
+
 @MainActor
 public struct OpenAIDashboardFetcher {
     public enum FetchError: LocalizedError {
@@ -95,6 +129,13 @@ public struct OpenAIDashboardFetcher {
         defer { lease.release() }
         let webView = lease.webView
         let log = lease.log
+        
+        // Cache key for debouncing repeated identical requests
+        let requestHash = websiteDataStore.value(forKey: "identifier") as? String ?? "\(ObjectIdentifier(websiteDataStore))"
+        if let cached = OpenAIDashboardRequestCache.shared.getIfValid(requestHash: requestHash) {
+            log("Returning cached dashboard data")
+            return cached
+        }
 
         var lastBody: String?
         var lastHTML: String?
@@ -221,7 +262,7 @@ public struct OpenAIDashboardFetcher {
                         continue
                     }
                 }
-                return OpenAIDashboardSnapshot(
+                let snapshot = OpenAIDashboardSnapshot(
                     signedInEmail: scrape.signedInEmail,
                     codeReviewRemainingPercent: codeReview,
                     creditEvents: events,
@@ -233,6 +274,9 @@ public struct OpenAIDashboardFetcher {
                     creditsRemaining: creditsRemaining,
                     accountPlan: accountPlan,
                     updatedAt: Date())
+                // Cache the result
+                OpenAIDashboardRequestCache.shared.set(snapshot, requestHash: requestHash)
+                return snapshot
             }
 
             try? await Task.sleep(for: .milliseconds(500))
