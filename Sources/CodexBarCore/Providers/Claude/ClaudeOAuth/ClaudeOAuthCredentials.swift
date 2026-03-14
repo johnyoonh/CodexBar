@@ -73,7 +73,13 @@ public enum ClaudeOAuthCredentialsStore {
     private static let memoryCacheLock = NSLock()
     private nonisolated(unsafe) static var cachedCredentialRecord: ClaudeOAuthCredentialRecord?
     private nonisolated(unsafe) static var cacheTimestamp: Date?
-    private static let memoryCacheValidityDuration: TimeInterval = 1800
+    private static let memoryCacheValidityDuration: TimeInterval = 7 * 24 * 60 * 60 // 7 days in seconds
+    
+    /// Check if cached credentials are still valid (not expired)
+    private static func isMemoryCacheValid() -> Bool {
+        guard let timestamp = self.cacheTimestamp else { return false }
+        return Date().timeIntervalSince(timestamp) < Self.memoryCacheValidityDuration
+    }
 
     private static func readMemoryCache() -> (record: ClaudeOAuthCredentialRecord?, timestamp: Date?) {
         #if DEBUG
@@ -83,6 +89,11 @@ public enum ClaudeOAuthCredentialsStore {
         #endif
         self.memoryCacheLock.lock()
         defer { self.memoryCacheLock.unlock() }
+        
+        // Return nil if cache is expired to force refresh
+        if !Self.isMemoryCacheValid() {
+            return (nil, nil)
+        }
         return (self.cachedCredentialRecord, self.cacheTimestamp)
     }
 
@@ -133,16 +144,22 @@ public enum ClaudeOAuthCredentialsStore {
         let memory = self.readMemoryCache()
         if let cachedRecord = memory.record,
            let timestamp = memory.timestamp,
-           Date().timeIntervalSince(timestamp) < self.memoryCacheValidityDuration,
            !cachedRecord.credentials.isExpired
         {
-            if self.shouldAttemptFreshnessSyncFromClaudeKeychain(cached: cachedRecord),
+            // Only attempt keychain sync on user-initiated actions or if cache is stale (>60s old)
+            // With 7-day cache, this means keychain is only accessed once per week or on manual refresh
+            let cacheAge = Date().timeIntervalSince(timestamp)
+            let shouldSync = cacheAge > 60 || ProviderInteractionContext.current == .userInitiated
+            
+            if shouldSync, self.shouldAttemptFreshnessSyncFromClaudeKeychain(cached: cachedRecord),
                let synced = self.syncWithClaudeKeychainIfChanged(
                    cached: cachedRecord,
                    respectKeychainPromptCooldown: shouldRespectKeychainPromptCooldownForSilentProbes)
             {
                 return synced
             }
+            
+            // Cache is valid and fresh enough, return it without keychain access
             return ClaudeOAuthCredentialRecord(
                 credentials: cachedRecord.credentials,
                 owner: cachedRecord.owner,
